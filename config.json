@@ -1,0 +1,7 @@
+{
+    "suggestion_set_count": 10,
+    "lookback_rounds": 10,
+    "gap_boost_multiplier": 0.1,
+    "gap_threshold": 5
+  }
+  
