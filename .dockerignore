@@ -1,0 +1,8 @@
+.git/
+.vscode/
+*.log
+*.out
+result/
+test/
+build/
+
