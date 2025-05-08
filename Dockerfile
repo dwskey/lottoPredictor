@@ -1,21 +1,21 @@
-# 베이스 이미지: 공식 Go 이미지 (최신 안정 버전)
-FROM golang:1.24.2
+# --- 1단계: 빌드 ---
+    FROM golang:1.24.2 AS builder
 
-# 작업 디렉토리 생성
-WORKDIR /app
-
-# 모듈 설정 파일 복사
-COPY go.mod go.sum ./
-
-# 의존성 설치 (캐시 최적화용)
-RUN go mod tidy
-
-# 전체 소스코드 복사
-COPY . .
-
-# 빌드 (main.go를 기준으로)
-RUN go build -o lottoApp main.go
-
-# 컨테이너 실행 시 동작
-CMD ["./lottoApp"]
-
+    WORKDIR /app
+    COPY go.mod go.sum ./
+    RUN go mod tidy
+    
+    COPY . .
+    RUN go build -o lottoApp main.go
+    
+    # --- 2단계: 실행 환경 (슬림화 가능) ---
+    FROM debian:bullseye-slim
+    WORKDIR /app
+    
+    # 실행에 필요한 파일만 복사
+    COPY --from=builder /app/lottoApp .
+    COPY config/ ./config/
+    COPY database/ ./database/
+    
+    CMD ["./lottoApp"]
+    

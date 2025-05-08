@@ -1,0 +1,13 @@
+version: "3.9"
+
+services:
+  lotto:
+    build: .
+    container_name: lotto_dev
+    volumes:
+      - .:/app               # 코드 동기화
+      - ./config:/app/config
+      - ./database:/app/database
+      - ./output:/app/output
+    working_dir: /app
+    command: ["./lottoApp"]
