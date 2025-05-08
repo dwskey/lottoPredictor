@@ -21,6 +21,7 @@ func CreatePredictionResultsTable(db *sql.DB) error {
 			num6 INTEGER,
 			percentage REAL,
 			rank INTEGER,
+			created_at TEXT,
 			PRIMARY KEY (draw_number, meta_idx, set_index)
 		)`)
 	return err
@@ -29,8 +30,8 @@ func CreatePredictionResultsTable(db *sql.DB) error {
 func SavePredictionResults(db *sql.DB, metaID int64, drawNo int, predictions [][]int) error {
 	stmt, err := db.Prepare(`
 		INSERT INTO prediction_results
-		(meta_idx, draw_number, set_index, num1, num2, num3, num4, num5, num6)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		(draw_number, meta_idx, set_index, num1, num2, num3, num4, num5, num6, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`)
 	if err != nil {
 		return err
 	}
