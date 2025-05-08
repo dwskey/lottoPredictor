@@ -191,8 +191,16 @@ func randFloat() float64 {
 	return float64(rand.Intn(1000000)) / 1000000.0
 }
 
+// 1회부터 baseDraw 회차 직전까지의 확률을 구하고, 다음 회차를 예측
+// 예측 결과를 prediction_results, prediction_meta 테이블에 저장하는 테스트/시뮬레이션용 분석 함수
 func AnalyzeWithDrawNumber(dbConn *sql.DB, baseDraw int) *PredictionResult {
-	rows, _ := dbConn.Query("SELECT draw_number, n1, n2, n3, n4, n5, n6 FROM lotto_results WHERE draw_number <= ? ORDER BY draw_number", baseDraw-1)
+	targetDraw := baseDraw + 1
+	log.Printf("[AnalyzeWithDrawNumber] 시작 - 기준 회차: %d → 예측 대상: %d\n", baseDraw, targetDraw)
+
+	rows, _ := dbConn.Query(`
+		SELECT draw_number, n1, n2, n3, n4, n5, n6 
+		FROM lotto_results 
+		WHERE draw_number <= ? ORDER BY draw_number`, baseDraw)
 	defer rows.Close()
 
 	totalDraws := 0
@@ -201,18 +209,16 @@ func AnalyzeWithDrawNumber(dbConn *sql.DB, baseDraw int) *PredictionResult {
 	lastSeen := make([]int, common.MaxLottoNum)
 	last10freq := make([]int, common.MaxLottoNum)
 
-	latestDraw := 0
 	for rows.Next() {
 		var drawNo int
 		var nums [6]int
 		rows.Scan(&drawNo, &nums[0], &nums[1], &nums[2], &nums[3], &nums[4], &nums[5])
-		latestDraw = drawNo
 		draws[drawNo] = nums[:]
 		totalDraws++
 		for _, n := range nums {
 			count[n-1]++
 			lastSeen[n-1] = drawNo
-			if drawNo > latestDraw-config.AppConfig.LookbackRounds {
+			if drawNo > baseDraw-config.AppConfig.LookbackRounds {
 				last10freq[n-1]++
 			}
 		}
@@ -222,18 +228,18 @@ func AnalyzeWithDrawNumber(dbConn *sql.DB, baseDraw int) *PredictionResult {
 	gaps := map[int]int{}
 	for i := 0; i < common.MaxLottoNum; i++ {
 		probs[i+1] = float64(count[i]) / float64(totalDraws) * 100
-		gaps[i+1] = baseDraw - lastSeen[i]
+		gaps[i+1] = targetDraw - lastSeen[i]
 	}
 
-	// 확률 저장
-	db.SaveDrawProbabilities(dbConn, baseDraw-1, probs)
-	db.SaveReappearanceProbabilities(dbConn, baseDraw-1, computeReappearance(draws, baseDraw-1))
+	// 확률 저장은 baseDraw 기준
+	db.SaveDrawProbabilities(dbConn, baseDraw, probs)
+	db.SaveReappearanceProbabilities(dbConn, baseDraw, computeReappearance(draws, baseDraw))
 
 	top10 := topNumbers(count, 10, true)
 	least10 := topNumbers(count, 10, false)
 	missing := []int{}
 	for i := 0; i < common.MaxLottoNum; i++ {
-		if baseDraw-lastSeen[i] >= config.AppConfig.GapThreshold {
+		if targetDraw-lastSeen[i] >= config.AppConfig.GapThreshold {
 			missing = append(missing, i+1)
 		}
 	}
@@ -243,18 +249,24 @@ func AnalyzeWithDrawNumber(dbConn *sql.DB, baseDraw int) *PredictionResult {
 	for i := 0; i < config.AppConfig.SuggestionSetCount; i++ {
 		suggestions = append(suggestions, generateWeightedSample(probs, gaps, common.SetSize))
 	}
+	log.Printf("[AnalyzeWithDrawNumber] 추천 번호 생성 완료 (%d 세트), 저장 시작", len(suggestions))
 
-	metaIdx, err := db.InsertPredictionMeta(dbConn, baseDraw)
+	metaIdx, err := db.InsertPredictionMeta(dbConn, targetDraw)
 	if err != nil {
 		log.Fatal("메타 저장 실패:", err)
+	} else {
+		log.Printf("메타 저장 성공(drawNo:%d, metaIdx:%d)", targetDraw, metaIdx)
 	}
-	err = db.SavePredictionResults(dbConn, int64(baseDraw), metaIdx, suggestions)
+
+	err = db.SavePredictionResults(dbConn, int64(targetDraw), metaIdx, suggestions)
 	if err != nil {
 		log.Fatal("추천 결과 저장 실패:", err)
+	} else {
+		log.Printf("추천 결과 저장 성공(drawNo:%d, metaIdx:%d)", targetDraw, metaIdx)
 	}
 
 	return &PredictionResult{
-		DrawNumber:     baseDraw,
+		DrawNumber:     targetDraw,
 		Probabilities:  probs,
 		Gaps:           gaps,
 		TopFrequent:    top10,
@@ -277,9 +289,17 @@ func LoadLastPredictionResult(dbConn *sql.DB, drawNo int) *PredictionResult {
 		WHERE draw_number = ?
 	`, drawNo)
 
-	var metaIdx int
-	if err := row.Scan(&metaIdx); err != nil {
+	var nullMetaIdx sql.NullInt64
+	if err := row.Scan(&nullMetaIdx); err != nil {
 		log.Printf("메타 인덱스 조회 실패: %v\n", err)
+		return result
+	}
+
+	metaIdx := 0
+	if nullMetaIdx.Valid {
+		metaIdx = int(nullMetaIdx.Int64)
+	} else {
+		log.Printf("draw_number %d에 대한 meta_idx 결과 없음, 0으로 처리\n", drawNo)
 		return result
 	}
 
