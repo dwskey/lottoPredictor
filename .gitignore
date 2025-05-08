@@ -1,0 +1,7 @@
+# 로또 결과 DB 파일
+database/*.db
+
+# 분석 결과 출력물
+result/
+test/result/
+
